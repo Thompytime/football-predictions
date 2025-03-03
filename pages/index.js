@@ -7,6 +7,7 @@ export default function Home() {
   const [user, setUser] = useState(null);
   const [predictions, setPredictions] = useState({});
   const [leaderboard, setLeaderboard] = useState([]);
+  const [userPredictions, setUserPredictions] = useState([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
@@ -21,13 +22,19 @@ export default function Home() {
     const getUser = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user);
-      if (user) fetchLeaderboard();
+      if (user) {
+        fetchLeaderboard();
+        fetchUserPredictions();
+      }
     };
     getUser();
 
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) fetchLeaderboard();
+      if (session?.user) {
+        fetchLeaderboard();
+        fetchUserPredictions();
+      }
     });
 
     return () => authListener.subscription.unsubscribe();
@@ -57,6 +64,7 @@ export default function Home() {
       setUser(null);
       setPredictions({});
       setLeaderboard([]);
+      setUserPredictions([]);
     }
   };
 
@@ -87,10 +95,72 @@ export default function Home() {
       alert('Predictions saved successfully!');
       setPredictions({});
       fetchLeaderboard();
+      fetchUserPredictions();
     }
   };
 
   const fetchLeaderboard = async () => {
+    const { data: predictions, error: predError } = await supabase
+      .from('predictions')
+      .select('user_id, home_team, away_team, home_goals, away_goals');
+    const { data: results, error: resError } = await supabase
+      .from('results')
+      .select('home_team, away_team, home_goals, away_goals');
+
+    if (predError || resError) {
+      console.error('Fetch error:', predError || resError);
+      return;
+    }
+
+    const pointsByUser = {};
+    predictions.forEach(pred => {
+      const result = results.find(
+        r => r.home_team === pred.home_team && r.away_team === pred.away_team
+      );
+      const userId = pred.user_id;
+      if (!pointsByUser[userId]) pointsByUser[userId] = { points: 0, email: '' };
+
+      if (result) {
+        const predDiff = pred.home_goals - pred.away_goals;
+        const resultDiff = result.home_goals - result.away_goals;
+        if (pred.home_goals === result.home_goals && pred.away_goals === result.away_goals) {
+          pointsByUser[userId].points += 5;
+        } else if (
+          (predDiff > 0 && resultDiff > 0) ||
+          (predDiff < 0 && resultDiff < 0) ||
+          (predDiff === 0 && resultDiff === 0)
+        ) {
+          pointsByUser[userId].points += 2;
+        }
+      }
+    });
+
+    // Fetch user emails
+    const userIds = Object.keys(pointsByUser);
+    const { data: users, error: userError } = await supabase
+      .from('predictions')
+      .select('user_id')
+      .in('user_id', userIds)
+      .limit(1, { per: 'user_id' }); // Get distinct users
+    if (userError) console.error('User fetch error:', userError);
+
+    const emailPromises = userIds.map(async (id) => {
+      const { data: authUser } = await supabase.auth.admin.getUserById(id);
+      return { id, email: authUser?.user?.email || id.slice(0, 8) };
+    });
+    const userEmails = await Promise.all(emailPromises);
+    userEmails.forEach(({ id, email }) => {
+      if (pointsByUser[id]) pointsByUser[id].email = email;
+    });
+
+    const leaderboardData = Object.entries(pointsByUser)
+      .map(([userId, { points, email }]) => ({ user_id: userId, email, points }))
+      .sort((a, b) => b.points - a.points);
+
+    setLeaderboard(leaderboardData);
+  };
+
+  const fetchUserPredictions = async () => {
     const { data: predictions, error: predError } = await supabase
       .from('predictions')
       .select('user_id, home_team, away_team, home_goals, away_goals, created_at')
@@ -104,7 +174,7 @@ export default function Home() {
       return;
     }
 
-    const leaderboardData = predictions.map(pred => {
+    const predictionData = predictions.map(pred => {
       const result = results.find(
         r => r.home_team === pred.home_team && r.away_team === pred.away_team
       );
@@ -113,13 +183,13 @@ export default function Home() {
         const predDiff = pred.home_goals - pred.away_goals;
         const resultDiff = result.home_goals - result.away_goals;
         if (pred.home_goals === result.home_goals && pred.away_goals === result.away_goals) {
-          points = 5; // Exact score
+          points = 5;
         } else if (
           (predDiff > 0 && resultDiff > 0) ||
           (predDiff < 0 && resultDiff < 0) ||
           (predDiff === 0 && resultDiff === 0)
         ) {
-          points = 2; // Correct winner/draw
+          points = 2;
         }
       }
       return {
@@ -132,7 +202,7 @@ export default function Home() {
       };
     });
 
-    setLeaderboard(leaderboardData);
+    setUserPredictions(predictionData);
   };
 
   return (
@@ -206,7 +276,7 @@ export default function Home() {
           </table>
           <button onClick={submitPredictions}>Submit Predictions</button>
 
-          <h3>Leaderboard</h3>
+          <h3>Predictions</h3>
           <table className={styles.table}>
             <thead>
               <tr>
@@ -219,8 +289,8 @@ export default function Home() {
               </tr>
             </thead>
             <tbody>
-              {leaderboard.length > 0 ? (
-                leaderboard.map((entry, index) => (
+              {userPredictions.length > 0 ? (
+                userPredictions.map((entry, index) => (
                   <tr key={index}>
                     <td>{entry.user_id.slice(0, 8)}</td>
                     <td>{entry.match}</td>
@@ -233,6 +303,30 @@ export default function Home() {
               ) : (
                 <tr>
                   <td colSpan="6">No predictions yet</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+
+          <h3>Leaderboard</h3>
+          <table className={styles.table}>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Points</th>
+              </tr>
+            </thead>
+            <tbody>
+              {leaderboard.length > 0 ? (
+                leaderboard.map((entry, index) => (
+                  <tr key={index}>
+                    <td>{entry.email}</td>
+                    <td>{entry.points}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="2">No scores yet</td>
                 </tr>
               )}
             </tbody>
