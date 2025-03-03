@@ -81,7 +81,6 @@ export default function Home() {
     setLeaderboard(data || []);
   };
 
-  // Rest of the JSX remains the same
   return (
     <div className={styles.container}>
       <h2>Football Predictions</h2>
@@ -145,3 +144,11 @@ export default function Home() {
               <td>{pred.user_id.slice(0, 8)}</td>
               <td>{pred.home_team} vs {pred.away_team}</td>
               <td>{pred.home_goals} - {pred.away_goals}</td>
+              <td>{new Date(pred.created_at).toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
