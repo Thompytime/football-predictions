@@ -25,7 +25,6 @@ export default function Home() {
     };
     getUser();
 
-    // Listen for auth state changes
     const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) fetchLeaderboard();
@@ -35,35 +34,26 @@ export default function Home() {
   }, []);
 
   const handleRegister = async () => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) {
-      alert('Registration failed: ' + error.message);
-    } else {
-      alert('Registration successful! Check your email to confirm.');
-      setIsRegistering(false);
-    }
+    const { data, error } = await supabase.auth.signUp({ email, password });
+    if (error) alert('Registration failed: ' + error.message);
+    else alert('Registration successful! Check your email to confirm.');
+    setIsRegistering(false);
   };
 
   const handleLogin = async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      alert('Login failed: ' + error.message);
-    } else {
-      setUser(data.user);
+    if (!email || !password) {
+      alert('Please enter both email and password');
+      return;
     }
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert('Login failed: ' + error.message);
+    else setUser(data.user);
   };
 
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) {
-      alert('Logout failed: ' + error.message);
-    } else {
+    if (error) alert('Logout failed: ' + error.message);
+    else {
       setUser(null);
       setPredictions({});
       setLeaderboard([]);
@@ -73,10 +63,7 @@ export default function Home() {
   const handlePredictionChange = (matchIndex, team, value) => {
     setPredictions(prev => ({
       ...prev,
-      [matchIndex]: {
-        ...prev[matchIndex],
-        [team]: value,
-      },
+      [matchIndex]: { ...prev[matchIndex], [team]: value },
     }));
   };
 
@@ -85,7 +72,6 @@ export default function Home() {
       alert('Please login first');
       return;
     }
-
     const predictionData = matches.map((match, index) => ({
       user_id: user.id,
       match_date: match.date,
@@ -95,29 +81,58 @@ export default function Home() {
       away_goals: parseInt(predictions[index]?.away) || 0,
       created_at: new Date().toISOString(),
     }));
-
-    const { error } = await supabase
-      .from('predictions')
-      .insert(predictionData);
-
-    if (error) {
-      alert('Error saving predictions: ' + error.message);
-    } else {
+    const { error } = await supabase.from('predictions').insert(predictionData);
+    if (error) alert('Error saving predictions: ' + error.message);
+    else {
       alert('Predictions saved successfully!');
+      setPredictions({});
       fetchLeaderboard();
     }
   };
 
   const fetchLeaderboard = async () => {
-    const { data, error } = await supabase
+    const { data: predictions, error: predError } = await supabase
       .from('predictions')
-      .select('*')
+      .select('user_id, home_team, away_team, home_goals, away_goals, created_at')
       .order('created_at', { ascending: false });
-    if (error) {
-      console.error('Error fetching leaderboard:', error);
-    } else {
-      setLeaderboard(data || []);
+    const { data: results, error: resError } = await supabase
+      .from('results')
+      .select('home_team, away_team, home_goals, away_goals');
+
+    if (predError || resError) {
+      console.error('Fetch error:', predError || resError);
+      return;
     }
+
+    const leaderboardData = predictions.map(pred => {
+      const result = results.find(
+        r => r.home_team === pred.home_team && r.away_team === pred.away_team
+      );
+      let points = 0;
+      if (result) {
+        const predDiff = pred.home_goals - pred.away_goals;
+        const resultDiff = result.home_goals - result.away_goals;
+        if (pred.home_goals === result.home_goals && pred.away_goals === result.away_goals) {
+          points = 5; // Exact score
+        } else if (
+          (predDiff > 0 && resultDiff > 0) ||
+          (predDiff < 0 && resultDiff < 0) ||
+          (predDiff === 0 && resultDiff === 0)
+        ) {
+          points = 2; // Correct winner/draw
+        }
+      }
+      return {
+        user_id: pred.user_id,
+        match: `${pred.home_team} vs ${pred.away_team}`,
+        prediction: `${pred.home_goals} - ${pred.away_goals}`,
+        result: result ? `${result.home_goals} - ${result.away_goals}` : 'N/A',
+        points,
+        date: new Date(pred.created_at).toLocaleString(),
+      };
+    });
+
+    setLeaderboard(leaderboardData);
   };
 
   return (
@@ -189,7 +204,6 @@ export default function Home() {
               ))}
             </tbody>
           </table>
-
           <button onClick={submitPredictions}>Submit Predictions</button>
 
           <h3>Leaderboard</h3>
@@ -199,22 +213,26 @@ export default function Home() {
                 <th>User</th>
                 <th>Match</th>
                 <th>Prediction</th>
+                <th>Result</th>
+                <th>Points</th>
                 <th>Date</th>
               </tr>
             </thead>
             <tbody>
               {leaderboard.length > 0 ? (
-                leaderboard.map((pred, index) => (
+                leaderboard.map((entry, index) => (
                   <tr key={index}>
-                    <td>{pred.user_id.slice(0, 8)}</td>
-                    <td>{pred.home_team} vs {pred.away_team}</td>
-                    <td>{pred.home_goals} - {pred.away_goals}</td>
-                    <td>{new Date(pred.created_at).toLocaleString()}</td>
+                    <td>{entry.user_id.slice(0, 8)}</td>
+                    <td>{entry.match}</td>
+                    <td>{entry.prediction}</td>
+                    <td>{entry.result}</td>
+                    <td>{entry.points}</td>
+                    <td>{entry.date}</td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="4">No predictions yet</td>
+                  <td colSpan="6">No predictions yet</td>
                 </tr>
               )}
             </tbody>
