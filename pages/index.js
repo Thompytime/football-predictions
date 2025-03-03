@@ -10,6 +10,7 @@ export default function Home() {
   const [userPredictions, setUserPredictions] = useState([]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
 
   const matches = [
@@ -41,10 +42,25 @@ export default function Home() {
   }, []);
 
   const handleRegister = async () => {
+    if (!email || !password || !username) {
+      alert('Please enter email, password, and username');
+      return;
+    }
     const { data, error } = await supabase.auth.signUp({ email, password });
-    if (error) alert('Registration failed: ' + error.message);
-    else alert('Registration successful! Check your email to confirm.');
-    setIsRegistering(false);
+    if (error) {
+      alert('Registration failed: ' + error.message);
+    } else {
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert({ id: data.user.id, username });
+      if (profileError) {
+        alert('Failed to save username: ' + profileError.message);
+      } else {
+        alert('Registration successful! Check your email to confirm.');
+        setIsRegistering(false);
+        setUsername('');
+      }
+    }
   };
 
   const handleLogin = async () => {
@@ -118,7 +134,7 @@ export default function Home() {
         r => r.home_team === pred.home_team && r.away_team === pred.away_team
       );
       const userId = pred.user_id;
-      if (!pointsByUser[userId]) pointsByUser[userId] = { points: 0, email: '' };
+      if (!pointsByUser[userId]) pointsByUser[userId] = { points: 0, username: '' };
 
       if (result) {
         const predDiff = pred.home_goals - pred.away_goals;
@@ -135,26 +151,23 @@ export default function Home() {
       }
     });
 
-    // Fetch user emails
-    const userIds = Object.keys(pointsByUser);
-    const { data: users, error: userError } = await supabase
-      .from('predictions')
-      .select('user_id')
-      .in('user_id', userIds)
-      .limit(1, { per: 'user_id' }); // Get distinct users
-    if (userError) console.error('User fetch error:', userError);
+    // Fetch usernames from profiles table
+    const { data: profiles, error: profError } = await supabase
+      .from('profiles')
+      .select('id, username')
+      .in('id', Object.keys(pointsByUser));
+    if (profError) console.error('Profiles fetch error:', profError);
 
-    const emailPromises = userIds.map(async (id) => {
-      const { data: authUser } = await supabase.auth.admin.getUserById(id);
-      return { id, email: authUser?.user?.email || id.slice(0, 8) };
-    });
-    const userEmails = await Promise.all(emailPromises);
-    userEmails.forEach(({ id, email }) => {
-      if (pointsByUser[id]) pointsByUser[id].email = email;
+    profiles?.forEach(profile => {
+      if (pointsByUser[profile.id]) pointsByUser[profile.id].username = profile.username;
     });
 
     const leaderboardData = Object.entries(pointsByUser)
-      .map(([userId, { points, email }]) => ({ user_id: userId, email, points }))
+      .map(([userId, { points, username }]) => ({
+        user_id: userId,
+        username: username || userId.slice(0, 8), // Fallback to ID if username missing
+        points,
+      }))
       .sort((a, b) => b.points - a.points);
 
     setLeaderboard(leaderboardData);
@@ -222,6 +235,14 @@ export default function Home() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          {isRegistering && (
+            <input
+              type="text"
+              placeholder="Username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          )}
           {isRegistering ? (
             <button onClick={handleRegister}>Register</button>
           ) : (
@@ -320,7 +341,7 @@ export default function Home() {
               {leaderboard.length > 0 ? (
                 leaderboard.map((entry, index) => (
                   <tr key={index}>
-                    <td>{entry.email}</td>
+                    <td>{entry.username}</td>
                     <td>{entry.points}</td>
                   </tr>
                 ))
