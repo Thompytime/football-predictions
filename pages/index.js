@@ -1,74 +1,54 @@
-import { useState, useEffect } from 'react'
-import { createClient } from '@supabase/supabase-js'
-import styles from '../styles/Home.module.css'
-
-// Initialize Supabase client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-)
+// pages/index.js
+import { useState, useEffect } from 'react';
+import { supabase } from './_app'; // Import from _app.js
+import styles from '../styles/Home.module.css';
 
 export default function Home() {
-  const [user, setUser] = useState(null)
-  const [predictions, setPredictions] = useState({})
-  const [leaderboard, setLeaderboard] = useState([])
+  const [user, setUser] = useState(null);
+  const [predictions, setPredictions] = useState({});
+  const [leaderboard, setLeaderboard] = useState([]);
 
   const matches = [
-    {
-      date: '02/03/2025',
-      time: '22:00',
-      home: 'Sao Paulo',
-      away: 'Bragantino'
-    },
-    {
-      date: '03/03/2025',
-      time: '16:00',
-      home: 'Esteghlal FC',
-      away: 'Al-Nassr'
-    },
-    {
-      date: '03/03/2025',
-      time: '19:30',
-      home: 'Nottingham Forest',
-      away: 'Ipswich Town'
-    }
-  ]
+    { date: '02/03/2025', time: '22:00', home: 'Sao Paulo', away: 'Bragantino' },
+    { date: '03/03/2025', time: '16:00', home: 'Esteghlal FC', away: 'Al-Nassr' },
+    { date: '03/03/2025', time: '19:30', home: 'Nottingham Forest', away: 'Ipswich Town' },
+  ];
 
   useEffect(() => {
     // Check if user is logged in
     const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-      if (user) fetchLeaderboard()
-    }
-    getUser()
-  }, [])
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user);
+      if (user) fetchLeaderboard();
+    };
+    getUser();
+  }, []);
 
   const handleLogin = async () => {
-    const email = prompt('Enter your email')
-    const password = prompt('Enter your password')
+    const email = prompt('Enter your email');
+    const password = prompt('Enter your password');
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
-      password
-    })
-    if (data.user) setUser(data.user)
-    if (error) alert('Login failed')
-  }
+      password,
+    });
+    if (data.user) setUser(data.user);
+    if (error) alert('Login failed');
+  };
 
   const handlePredictionChange = (matchIndex, team, value) => {
     setPredictions(prev => ({
       ...prev,
       [matchIndex]: {
         ...prev[matchIndex],
-        [team]: value
-      }
-    }))
-  }
+        [team]: value,
+      },
+    }));
+  };
 
   const submitPredictions = async () => {
     if (!user) {
-      alert('Please login first')
-      return
+      alert('Please login first');
+      return;
     }
 
     const predictionData = matches.map((match, index) => ({
@@ -78,29 +58,30 @@ export default function Home() {
       away_team: match.away,
       home_goals: predictions[index]?.home || 0,
       away_goals: predictions[index]?.away || 0,
-      created_at: new Date().toISOString()
-    }))
+      created_at: new Date().toISOString(),
+    }));
 
     const { error } = await supabase
       .from('predictions')
-      .insert(predictionData)
+      .insert(predictionData);
 
     if (error) {
-      alert('Error saving predictions')
+      alert('Error saving predictions');
     } else {
-      alert('Predictions saved successfully!')
-      fetchLeaderboard()
+      alert('Predictions saved successfully!');
+      fetchLeaderboard();
     }
-  }
+  };
 
   const fetchLeaderboard = async () => {
     const { data } = await supabase
       .from('predictions')
       .select('*')
-      .order('created_at', { ascending: false })
-    setLeaderboard(data)
-  }
+      .order('created_at', { ascending: false });
+    setLeaderboard(data || []);
+  };
 
+  // Rest of the JSX remains the same
   return (
     <div className={styles.container}>
       <h2>Football Predictions</h2>
@@ -164,11 +145,3 @@ export default function Home() {
               <td>{pred.user_id.slice(0, 8)}</td>
               <td>{pred.home_team} vs {pred.away_team}</td>
               <td>{pred.home_goals} - {pred.away_goals}</td>
-              <td>{new Date(pred.created_at).toLocaleString()}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-}
